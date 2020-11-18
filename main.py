@@ -4,14 +4,16 @@
 # File Name             : main.py                #
 # ---------------------------------------------- #
 
+import config
+
+from telegram import Bot
+from discord_webhook import DiscordWebhook
 import logging
 import asyncio as aio
 import websockets
 import json
 
 loop = aio.get_event_loop()
-
-liquidation_threshold = 50000
 
 async def receive_data():
     ws = await websockets.connect("wss://www.bitmex.com/realtime?subscribe=liquidation:XBTUSD,liquidation:ETHUSD")
@@ -40,12 +42,10 @@ async def receive_data():
 
 async def handle_feed(data):
     x = json.loads(data)
-    print(x)
     if 'table' in x and x['table'] == 'liquidation':
         if 'action' in x and x['action'] == 'insert':
             if 'data' in x and isinstance(x['data'], list):
-
-                if float(x['data'][0]['leavesQty']) > liquidation_threshold:
+                if float(x['data'][0]['leavesQty']) > config.liquidation_threshold:
 
                     side        = 'SHORT' if x['data'][0]['side'] == 'Buy' else 'LONG'
                     contracts   = '{:,.0f}'.format(float(x['data'][0]['leavesQty']))
@@ -53,7 +53,17 @@ async def handle_feed(data):
                     ticker      = x['data'][0]['symbol']
 
                     liquidation = f'Liquidated #{side} ${ticker} {contracts} contracts at ${price}!'
-                    print(liquidation)
+
+                    if config.send_terminal_alerts:
+                        print(liquidation)
+
+                    if config.telegram:
+                        tg_bot = Bot(token=config.tg_token)
+                        tg_bot.sendMessage(config.channel, liquidation)
+
+                    if config.discord:
+                        discord_alert = DiscordWebhook(url=config.discord_webhook, content=liquidation)
+                        response = discord_alert.execute()
 
 if __name__ == '__main__':
     try:
